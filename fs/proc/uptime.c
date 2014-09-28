@@ -6,6 +6,24 @@
 #include <linux/time.h>
 #include <linux/kernel_stat.h>
 #include <linux/cputime.h>
+#include <linux/syscalls.h>
+#include <linux/kernel.h>
+#include <uapi/asm-generic/errno-base.h>
+#include <linux/printk.h>
+
+SYSCALL_DEFINE1(uptime, long __user *, mseconds)
+{
+	struct timespec ut;
+
+	get_monotonic_boottime(&ut);
+	pr_debug("seconds: %l, nanoseconds: %l\n", ut.tv_sec, ut.tv_nsec);
+	*mseconds = ut.tv_nsec / NSEC_PER_MSEC;
+	if (*mseconds + ut.tv_sec * MSEC_PER_SEC > LONG_MAX)
+	  return -ERANGE;
+	*mseconds += ut.tv_sec * MSEC_PER_SEC;
+	pr_debug("result in milliseconds: %l\n", *mseconds);
+	return 0;
+}
 
 static int uptime_proc_show(struct seq_file *m, void *v)
 {
