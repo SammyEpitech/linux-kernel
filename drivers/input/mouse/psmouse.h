@@ -94,6 +94,7 @@ enum psmouse_type {
 	PSMOUSE_HGPK,
 	PSMOUSE_ELANTECH,
 	PSMOUSE_FSP,
+	PSMOUSE_SYNAPTICS_RELATIVE,
 	PSMOUSE_CYPRESS,
 	PSMOUSE_AUTO		/* This one should always be last */
 };
@@ -104,6 +105,9 @@ int psmouse_sliced_command(struct psmouse *psmouse, unsigned char command);
 int psmouse_reset(struct psmouse *psmouse);
 void psmouse_set_state(struct psmouse *psmouse, enum psmouse_state new_state);
 void psmouse_set_resolution(struct psmouse *psmouse, unsigned int resolution);
+psmouse_ret_t psmouse_process_byte(struct psmouse *psmouse);
+int psmouse_activate(struct psmouse *psmouse);
+int psmouse_deactivate(struct psmouse *psmouse);
 
 struct psmouse_attribute {
 	struct device_attribute dattr;

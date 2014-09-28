@@ -93,20 +93,14 @@ struct dmi_dev_onboard {
 	int devfn;
 };
 
-/*
- * bwh: These functions are renamed so that modules won't load on an
- * older kernel version where setting the 'exact_match' flag would
- * result in an array overrun.
- */
-#define dmi_check_system dmi_check_system_2
-#define dmi_first_match dmi_first_match_2
-
 extern int dmi_check_system(const struct dmi_system_id *list);
 const struct dmi_system_id *dmi_first_match(const struct dmi_system_id *list);
 extern const char * dmi_get_system_info(int field);
 extern const struct dmi_device * dmi_find_device(int type, const char *name,
 	const struct dmi_device *from);
 extern void dmi_scan_machine(void);
+extern void dmi_memdev_walk(void);
+extern void dmi_set_dump_stack_arch_desc(void);
 extern bool dmi_get_date(int field, int *yearp, int *monthp, int *dayp);
 extern int dmi_name_in_vendors(const char *str);
 extern int dmi_name_in_serial(const char *str);
@@ -114,6 +108,7 @@ extern int dmi_available;
 extern int dmi_walk(void (*decode)(const struct dmi_header *, void *),
 	void *private_data);
 extern bool dmi_match(enum dmi_field f, const char *str);
+extern void dmi_memdev_name(u16 handle, const char **bank, const char **device);
 
 #else
 
@@ -122,6 +117,8 @@ static inline const char * dmi_get_system_info(int field) { return NULL; }
 static inline const struct dmi_device * dmi_find_device(int type, const char *name,
 	const struct dmi_device *from) { return NULL; }
 static inline void dmi_scan_machine(void) { return; }
+static inline void dmi_memdev_walk(void) { }
+static inline void dmi_set_dump_stack_arch_desc(void) { }
 static inline bool dmi_get_date(int field, int *yearp, int *monthp, int *dayp)
 {
 	if (yearp)
@@ -139,6 +136,8 @@ static inline int dmi_walk(void (*decode)(const struct dmi_header *, void *),
 	void *private_data) { return -1; }
 static inline bool dmi_match(enum dmi_field f, const char *str)
 	{ return false; }
+static inline void dmi_memdev_name(u16 handle, const char **bank,
+		const char **device) { }
 static inline const struct dmi_system_id *
 	dmi_first_match(const struct dmi_system_id *list) { return NULL; }
 

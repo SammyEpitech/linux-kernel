@@ -69,21 +69,18 @@ struct pps_device {
 	wait_queue_head_t queue;		/* PPS event queue */
 
 	unsigned int id;			/* PPS source unique ID */
+	void const *lookup_cookie;		/* pps_lookup_dev only */
 	struct cdev cdev;
 	struct device *dev;
 	struct fasync_struct *async_queue;	/* fasync method */
 	spinlock_t lock;
-
-#ifndef __GENKSYMS__
-	void const *lookup_cookie;		/* pps_lookup_dev only */
-#endif
 };
 
 /*
  * Global variables
  */
 
-extern struct device_attribute pps_attrs[];
+extern const struct attribute_group *pps_groups[];
 
 /*
  * Internal functions.
@@ -129,6 +126,15 @@ static inline void pps_get_ts(struct pps_event_time *ts)
 }
 
 #endif /* CONFIG_NTP_PPS */
+
+/* Subtract known time delay from PPS event time(s) */
+static inline void pps_sub_ts(struct pps_event_time *ts, struct timespec delta)
+{
+	ts->ts_real = timespec_sub(ts->ts_real, delta);
+#ifdef CONFIG_NTP_PPS
+	ts->ts_raw = timespec_sub(ts->ts_raw, delta);
+#endif
+}
 
 #endif /* LINUX_PPS_KERNEL_H */
 

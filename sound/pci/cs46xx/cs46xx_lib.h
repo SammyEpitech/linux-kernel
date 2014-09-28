@@ -90,7 +90,7 @@ static inline unsigned int snd_cs46xx_peekBA0(struct snd_cs46xx *chip, unsigned 
 struct dsp_spos_instance *cs46xx_dsp_spos_create (struct snd_cs46xx * chip);
 void cs46xx_dsp_spos_destroy (struct snd_cs46xx * chip);
 int cs46xx_dsp_load_module (struct snd_cs46xx * chip, struct dsp_module_desc * module);
-#ifdef CONFIG_PM
+#ifdef CONFIG_PM_SLEEP
 int cs46xx_dsp_resume(struct snd_cs46xx * chip);
 #endif
 struct dsp_symbol_entry *cs46xx_dsp_lookup_symbol (struct snd_cs46xx * chip, char * symbol_name,
@@ -103,8 +103,8 @@ int cs46xx_dsp_proc_done (struct snd_cs46xx *chip);
 #define cs46xx_dsp_proc_done(chip)
 #endif
 int cs46xx_dsp_scb_and_task_init (struct snd_cs46xx *chip);
-int snd_cs46xx_download(struct snd_cs46xx *chip, const __le32 *src, unsigned long offset,
-			unsigned long len);
+int snd_cs46xx_download (struct snd_cs46xx *chip, u32 *src, unsigned long offset,
+			 unsigned long len);
 int snd_cs46xx_clear_BA1(struct snd_cs46xx *chip, unsigned long offset, unsigned long len);
 int cs46xx_dsp_enable_spdif_out (struct snd_cs46xx *chip);
 int cs46xx_dsp_enable_spdif_hw (struct snd_cs46xx *chip);

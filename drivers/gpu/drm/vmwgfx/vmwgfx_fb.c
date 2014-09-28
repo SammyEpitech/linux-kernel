@@ -28,10 +28,10 @@
 
 #include <linux/export.h>
 
-#include "drmP.h"
+#include <drm/drmP.h>
 #include "vmwgfx_drv.h"
 
-#include "ttm/ttm_placement.h"
+#include <drm/ttm/ttm_placement.h>
 
 #define VMW_DIRTY_DELAY (HZ / 30)
 
@@ -179,7 +179,6 @@ static int vmw_fb_set_par(struct fb_info *info)
 		vmw_write(vmw_priv, SVGA_REG_DISPLAY_POSITION_Y, info->var.yoffset);
 		vmw_write(vmw_priv, SVGA_REG_DISPLAY_WIDTH, info->var.xres);
 		vmw_write(vmw_priv, SVGA_REG_DISPLAY_HEIGHT, info->var.yres);
-		vmw_write(vmw_priv, SVGA_REG_BYTES_PER_LINE, info->fix.line_length);
 		vmw_write(vmw_priv, SVGA_REG_DISPLAY_ID, SVGA_ID_INVALID);
 	}
 
@@ -380,14 +379,13 @@ static int vmw_fb_create_bo(struct vmw_private *vmw_priv,
 
 	ne_placement.lpfn = (size + PAGE_SIZE - 1) >> PAGE_SHIFT;
 
-	/* interuptable? */
-	ret = ttm_write_lock(&vmw_priv->fbdev_master.lock, false);
-	if (unlikely(ret != 0))
-		return ret;
+	(void) ttm_write_lock(&vmw_priv->reservation_sem, false);
 
 	vmw_bo = kmalloc(sizeof(*vmw_bo), GFP_KERNEL);
-	if (!vmw_bo)
+	if (!vmw_bo) {
+		ret = -ENOMEM;
 		goto err_unlock;
+	}
 
 	ret = vmw_dmabuf_init(vmw_priv, vmw_bo, size,
 			      &ne_placement,
@@ -597,7 +595,7 @@ int vmw_fb_off(struct vmw_private *vmw_priv)
 	par->dirty.active = false;
 	spin_unlock_irqrestore(&par->dirty.lock, flags);
 
-	flush_delayed_work_sync(&info->deferred_work);
+	flush_delayed_work(&info->deferred_work);
 
 	par->bo_ptr = NULL;
 	ttm_bo_kunmap(&par->map);

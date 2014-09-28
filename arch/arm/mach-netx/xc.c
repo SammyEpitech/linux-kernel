@@ -127,14 +127,16 @@ int xc_request_firmware(struct xc *x)
 
 	ret = request_firmware(&fw, name, x->dev);
 
-	if (ret)
+	if (ret < 0) {
+		dev_err(x->dev, "request_firmware failed\n");
 		return ret;
+	}
 
 	head = (struct fw_header *)fw->data;
 	if (head->magic != 0x4e657458) {
 		if (head->magic == 0x5874654e) {
 			dev_err(x->dev,
-			    "firmware magic is 'XteN'. Endianess problems?\n");
+			    "firmware magic is 'XteN'. Endianness problems?\n");
 			ret = -ENODEV;
 			goto exit_release_firmware;
 		}

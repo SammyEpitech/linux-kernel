@@ -63,7 +63,11 @@ static int s35390a_set_reg(struct s35390a *s35390a, int reg, char *buf, int len)
 {
 	struct i2c_client *client = s35390a->client[reg];
 	struct i2c_msg msg[] = {
-		{ client->addr, 0, len, buf },
+		{
+			.addr = client->addr,
+			.len = len,
+			.buf = buf
+		},
 	};
 
 	if ((i2c_transfer(client->adapter, msg, 1)) != 1)
@@ -76,7 +80,12 @@ static int s35390a_get_reg(struct s35390a *s35390a, int reg, char *buf, int len)
 {
 	struct i2c_client *client = s35390a->client[reg];
 	struct i2c_msg msg[] = {
-		{ client->addr, I2C_M_RD, len, buf },
+		{
+			.addr = client->addr,
+			.flags = I2C_M_RD,
+			.len = len,
+			.buf = buf
+		},
 	};
 
 	if ((i2c_transfer(client->adapter, msg, 1)) != 1)
@@ -329,7 +338,8 @@ static int s35390a_probe(struct i2c_client *client,
 		goto exit;
 	}
 
-	s35390a = kzalloc(sizeof(struct s35390a), GFP_KERNEL);
+	s35390a = devm_kzalloc(&client->dev, sizeof(struct s35390a),
+				GFP_KERNEL);
 	if (!s35390a) {
 		err = -ENOMEM;
 		goto exit;
@@ -377,8 +387,9 @@ static int s35390a_probe(struct i2c_client *client,
 
 	device_set_wakeup_capable(&client->dev, 1);
 
-	s35390a->rtc = rtc_device_register(s35390a_driver.driver.name,
-				&client->dev, &s35390a_rtc_ops, THIS_MODULE);
+	s35390a->rtc = devm_rtc_device_register(&client->dev,
+					s35390a_driver.driver.name,
+					&s35390a_rtc_ops, THIS_MODULE);
 
 	if (IS_ERR(s35390a->rtc)) {
 		err = PTR_ERR(s35390a->rtc);
@@ -390,7 +401,6 @@ exit_dummy:
 	for (i = 1; i < 8; ++i)
 		if (s35390a->client[i])
 			i2c_unregister_device(s35390a->client[i]);
-	kfree(s35390a);
 
 exit:
 	return err;
@@ -399,14 +409,11 @@ exit:
 static int s35390a_remove(struct i2c_client *client)
 {
 	unsigned int i;
-
 	struct s35390a *s35390a = i2c_get_clientdata(client);
+
 	for (i = 1; i < 8; ++i)
 		if (s35390a->client[i])
 			i2c_unregister_device(s35390a->client[i]);
-
-	rtc_device_unregister(s35390a->rtc);
-	kfree(s35390a);
 
 	return 0;
 }
@@ -420,19 +427,8 @@ static struct i2c_driver s35390a_driver = {
 	.id_table	= s35390a_id,
 };
 
-static int __init s35390a_rtc_init(void)
-{
-	return i2c_add_driver(&s35390a_driver);
-}
-
-static void __exit s35390a_rtc_exit(void)
-{
-	i2c_del_driver(&s35390a_driver);
-}
+module_i2c_driver(s35390a_driver);
 
 MODULE_AUTHOR("Byron Bradley <byron.bbradley@gmail.com>");
 MODULE_DESCRIPTION("S35390A RTC driver");
 MODULE_LICENSE("GPL");
-
-module_init(s35390a_rtc_init);
-module_exit(s35390a_rtc_exit);

@@ -84,6 +84,93 @@ compiler optimizes the section accessing atomic_t variables.
 
 *** YOU HAVE BEEN WARNED! ***
 
+Properly aligned pointers, longs, ints, and chars (and unsigned
+equivalents) may be atomically loaded from and stored to in the same
+sense as described for atomic_read() and atomic_set().  The ACCESS_ONCE()
+macro should be used to prevent the compiler from using optimizations
+that might otherwise optimize accesses out of existence on the one hand,
+or that might create unsolicited accesses on the other.
+
+For example consider the following code:
+
+	while (a > 0)
+		do_something();
+
+If the compiler can prove that do_something() does not store to the
+variable a, then the compiler is within its rights transforming this to
+the following:
+
+	tmp = a;
+	if (a > 0)
+		for (;;)
+			do_something();
+
+If you don't want the compiler to do this (and you probably don't), then
+you should use something like the following:
+
+	while (ACCESS_ONCE(a) < 0)
+		do_something();
+
+Alternatively, you could place a barrier() call in the loop.
+
+For another example, consider the following code:
+
+	tmp_a = a;
+	do_something_with(tmp_a);
+	do_something_else_with(tmp_a);
+
+If the compiler can prove that do_something_with() does not store to the
+variable a, then the compiler is within its rights to manufacture an
+additional load as follows:
+
+	tmp_a = a;
+	do_something_with(tmp_a);
+	tmp_a = a;
+	do_something_else_with(tmp_a);
+
+This could fatally confuse your code if it expected the same value
+to be passed to do_something_with() and do_something_else_with().
+
+The compiler would be likely to manufacture this additional load if
+do_something_with() was an inline function that made very heavy use
+of registers: reloading from variable a could save a flush to the
+stack and later reload.  To prevent the compiler from attacking your
+code in this manner, write the following:
+
+	tmp_a = ACCESS_ONCE(a);
+	do_something_with(tmp_a);
+	do_something_else_with(tmp_a);
+
+For a final example, consider the following code, assuming that the
+variable a is set at boot time before the second CPU is brought online
+and never changed later, so that memory barriers are not needed:
+
+	if (a)
+		b = 9;
+	else
+		b = 42;
+
+The compiler is within its rights to manufacture an additional store
+by transforming the above code into the following:
+
+	b = 42;
+	if (a)
+		b = 9;
+
+This could come as a fatal surprise to other code running concurrently
+that expected b to never have the value 42 if a was zero.  To prevent
+the compiler from doing this, write something like:
+
+	if (a)
+		ACCESS_ONCE(b) = 9;
+	else
+		ACCESS_ONCE(b) = 42;
+
+Don't even -think- about doing this without proper use of memory barriers,
+locks, or atomic operations if variable a can change at runtime!
+
+*** WARNING: ACCESS_ONCE() DOES NOT IMPLY A BARRIER! ***
+
 Now, we move onto the atomic operation interfaces typically implemented with
 the help of assembly code.
 
@@ -166,6 +253,8 @@ This performs an atomic exchange operation on the atomic variable v, setting
 the given new value.  It returns the old value that the atomic variable v had
 just before the operation.
 
+atomic_xchg requires explicit memory barriers around the operation.
+
 	int atomic_cmpxchg(atomic_t *v, int old, int new);
 
 This performs an atomic compare exchange operation on the atomic value v,
@@ -196,15 +285,13 @@ If a caller requires memory barrier semantics around an atomic_t
 operation which does not return a value, a set of interfaces are
 defined which accomplish this:
 
-	void smp_mb__before_atomic_dec(void);
-	void smp_mb__after_atomic_dec(void);
-	void smp_mb__before_atomic_inc(void);
-	void smp_mb__after_atomic_inc(void);
+	void smp_mb__before_atomic(void);
+	void smp_mb__after_atomic(void);
 
-For example, smp_mb__before_atomic_dec() can be used like so:
+For example, smp_mb__before_atomic() can be used like so:
 
 	obj->dead = 1;
-	smp_mb__before_atomic_dec();
+	smp_mb__before_atomic();
 	atomic_dec(&obj->ref_count);
 
 It makes sure that all memory operations preceding the atomic_dec()
@@ -213,14 +300,9 @@ operation.  In the above example, it guarantees that the assignment of
 "1" to obj->dead will be globally visible to other cpus before the
 atomic counter decrement.
 
-Without the explicit smp_mb__before_atomic_dec() call, the
+Without the explicit smp_mb__before_atomic() call, the
 implementation could legally allow the atomic counter update visible
 to other cpus before the "obj->dead = 1;" assignment.
-
-The other three interfaces listed are used to provide explicit
-ordering with respect to memory operations after an atomic_dec() call
-(smp_mb__after_atomic_dec()) and around atomic_inc() calls
-(smp_mb__{before,after}_atomic_inc()).
 
 A missing memory barrier in the cases where they are required by the
 atomic_t implementation above can have disastrous results.  Here is
@@ -398,12 +480,12 @@ Finally there is the basic operation:
 Which returns a boolean indicating if bit "nr" is set in the bitmask
 pointed to by "addr".
 
-If explicit memory barriers are required around clear_bit() (which
-does not return a value, and thus does not need to provide memory
-barrier semantics), two interfaces are provided:
+If explicit memory barriers are required around {set,clear}_bit() (which do
+not return a value, and thus does not need to provide memory barrier
+semantics), two interfaces are provided:
 
-	void smp_mb__before_clear_bit(void);
-	void smp_mb__after_clear_bit(void);
+	void smp_mb__before_atomic(void);
+	void smp_mb__after_atomic(void);
 
 They are used as follows, and are akin to their atomic_t operation
 brothers:
@@ -411,13 +493,13 @@ brothers:
 	/* All memory operations before this call will
 	 * be globally visible before the clear_bit().
 	 */
-	smp_mb__before_clear_bit();
+	smp_mb__before_atomic();
 	clear_bit( ... );
 
 	/* The clear_bit() will be visible before all
 	 * subsequent memory operations.
 	 */
-	 smp_mb__after_clear_bit();
+	 smp_mb__after_atomic();
 
 There are two special bitops with lock barrier semantics (acquire/release,
 same as spinlocks). These operate in the same way as their non-_lock/unlock

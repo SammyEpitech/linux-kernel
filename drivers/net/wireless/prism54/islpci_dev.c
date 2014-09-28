@@ -13,8 +13,7 @@
  *  GNU General Public License for more details.
  *
  *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ *  along with this program; if not, see <http://www.gnu.org/licenses/>.
  *
  */
 
@@ -93,9 +92,12 @@ isl_upload_firmware(islpci_private *priv)
 		const u32 *fw_ptr;
 
 		rc = request_firmware(&fw_entry, priv->firmware, PRISM_FW_PDEV);
-		if (rc)
+		if (rc) {
+			printk(KERN_ERR
+			       "%s: request_firmware() failed for '%s'\n",
+			       "prism54", priv->firmware);
 			return rc;
-
+		}
 		/* prepare the Direct Memory Base register */
 		reg = ISL38XX_DEV_FIRMWARE_ADDRES;
 
@@ -790,8 +792,8 @@ islpci_set_multicast_list(struct net_device *dev)
 static void islpci_ethtool_get_drvinfo(struct net_device *dev,
                                        struct ethtool_drvinfo *info)
 {
-	strcpy(info->driver, DRV_NAME);
-	strcpy(info->version, DRV_VERSION);
+	strlcpy(info->driver, DRV_NAME, sizeof(info->driver));
+	strlcpy(info->version, DRV_VERSION, sizeof(info->version));
 }
 
 static const struct ethtool_ops islpci_ethtool_ops = {
@@ -801,7 +803,6 @@ static const struct ethtool_ops islpci_ethtool_ops = {
 static const struct net_device_ops islpci_netdev_ops = {
 	.ndo_open 		= islpci_open,
 	.ndo_stop		= islpci_close,
-	.ndo_do_ioctl		= prism54_ioctl,
 	.ndo_start_xmit		= islpci_eth_transmit,
 	.ndo_tx_timeout		= islpci_eth_tx_timeout,
 	.ndo_set_mac_address 	= prism54_set_mac_address,
@@ -838,7 +839,7 @@ islpci_setup(struct pci_dev *pdev)
 	/* ndev->set_multicast_list = &islpci_set_multicast_list; */
 	ndev->addr_len = ETH_ALEN;
 	/* Get a non-zero dummy MAC address for nameif. Jean II */
-	memcpy(ndev->dev_addr, dummy_mac, 6);
+	memcpy(ndev->dev_addr, dummy_mac, ETH_ALEN);
 
 	ndev->watchdog_timeo = ISLPCI_TX_TIMEOUT;
 
@@ -912,7 +913,6 @@ islpci_setup(struct pci_dev *pdev)
       do_islpci_free_memory:
 	islpci_free_memory(priv);
       do_free_netdev:
-	pci_set_drvdata(pdev, NULL);
 	free_netdev(ndev);
 	priv = NULL;
 	return NULL;

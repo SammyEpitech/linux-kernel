@@ -57,8 +57,8 @@ static int atl1e_get_settings(struct net_device *netdev,
 		else
 			ecmd->duplex = DUPLEX_HALF;
 	} else {
-		ethtool_cmd_speed_set(ecmd, -1);
-		ecmd->duplex = -1;
+		ethtool_cmd_speed_set(ecmd, SPEED_UNKNOWN);
+		ecmd->duplex = DUPLEX_UNKNOWN;
 	}
 
 	ecmd->autoneg = AUTONEG_ENABLE;
@@ -268,7 +268,7 @@ static int atl1e_set_eeprom(struct net_device *netdev,
 	if (eeprom_buff == NULL)
 		return -ENOMEM;
 
-	ptr = (u32 *)eeprom_buff;
+	ptr = eeprom_buff;
 
 	if (eeprom->offset & 3) {
 		/* need read/modify/write of first changed EEPROM word */
@@ -310,10 +310,12 @@ static void atl1e_get_drvinfo(struct net_device *netdev,
 {
 	struct atl1e_adapter *adapter = netdev_priv(netdev);
 
-	strncpy(drvinfo->driver,  atl1e_driver_name, 32);
-	strncpy(drvinfo->version, atl1e_driver_version, 32);
-	strncpy(drvinfo->fw_version, "L1e", 32);
-	strncpy(drvinfo->bus_info, pci_name(adapter->pdev), 32);
+	strlcpy(drvinfo->driver,  atl1e_driver_name, sizeof(drvinfo->driver));
+	strlcpy(drvinfo->version, atl1e_driver_version,
+		sizeof(drvinfo->version));
+	strlcpy(drvinfo->fw_version, "L1e", sizeof(drvinfo->fw_version));
+	strlcpy(drvinfo->bus_info, pci_name(adapter->pdev),
+		sizeof(drvinfo->bus_info));
 	drvinfo->n_stats = 0;
 	drvinfo->testinfo_len = 0;
 	drvinfo->regdump_len = atl1e_get_regs_len(netdev);
@@ -386,5 +388,5 @@ static const struct ethtool_ops atl1e_ethtool_ops = {
 
 void atl1e_set_ethtool_ops(struct net_device *netdev)
 {
-	SET_ETHTOOL_OPS(netdev, &atl1e_ethtool_ops);
+	netdev->ethtool_ops = &atl1e_ethtool_ops;
 }

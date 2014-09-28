@@ -39,11 +39,7 @@ extern int ixp4xx_pci_write(u32 addr, u32 cmd, u32 data);
  *    but in some cases the performance hit is acceptable. In addition, you
  *    cannot mmap() PCI devices in this case.
  */
-#ifndef	CONFIG_IXP4XX_INDIRECT_PCI
-
-#define __mem_pci(a)		(a)
-
-#else
+#ifdef	CONFIG_IXP4XX_INDIRECT_PCI
 
 /*
  * In the case of using indirect PCI, we simply return the actual PCI
@@ -52,28 +48,11 @@ extern int ixp4xx_pci_write(u32 addr, u32 cmd, u32 data);
  * fallback to the default.
  */
 
+extern unsigned long pcibios_min_mem;
 static inline int is_pci_memory(u32 addr)
 {
-	return (addr >= PCIBIOS_MIN_MEM) && (addr <= 0x4FFFFFFF);
+	return (addr >= pcibios_min_mem) && (addr <= 0x4FFFFFFF);
 }
-
-static inline void __iomem * __indirect_ioremap(unsigned long addr, size_t size,
-						unsigned int mtype)
-{
-	if (!is_pci_memory(addr))
-		return __arm_ioremap(addr, size, mtype);
-
-	return (void __iomem *)addr;
-}
-
-static inline void __indirect_iounmap(void __iomem *addr)
-{
-	if (!is_pci_memory((__force u32)addr))
-		__iounmap(addr);
-}
-
-#define __arch_ioremap			__indirect_ioremap
-#define __arch_iounmap			__indirect_iounmap
 
 #define writeb(v, p)			__indirect_writeb(v, p)
 #define writew(v, p)			__indirect_writew(v, p)
@@ -385,20 +364,6 @@ static inline unsigned int ioread16(const void __iomem *addr)
 #endif
 }
 
-#define	ioread16be(p)			ioread16be(p)
-static inline unsigned int ioread16be(const void __iomem *addr)
-{
-	unsigned long port = (unsigned long __force)addr;
-	if (__is_io_address(port))
-		return	(unsigned int)inw(port & PIO_MASK);
-	else
-#ifndef CONFIG_IXP4XX_INDIRECT_PCI
-		return be16_to_cpu((__force __be16)__raw_readw(addr));
-#else
-		return be16_to_cpu((__force __le16)(unsigned int)__indirect_readw(addr));
-#endif
-}
-
 #define	ioread16_rep(p, v, c)		ioread16_rep(p, v, c)
 static inline void ioread16_rep(const void __iomem *addr, void *vaddr,
 				u32 count)
@@ -425,21 +390,6 @@ static inline unsigned int ioread32(const void __iomem *addr)
 		return le32_to_cpu((__force __le32)__raw_readl(addr));
 #else
 		return (unsigned int)__indirect_readl(addr);
-#endif
-	}
-}
-
-#define	ioread32be(p)			ioread32be(p)
-static inline unsigned int ioread32be(const void __iomem *addr)
-{
-	unsigned long port = (unsigned long __force)addr;
-	if (__is_io_address(port))
-		return	(unsigned int)inl(port & PIO_MASK);
-	else {
-#ifndef CONFIG_IXP4XX_INDIRECT_PCI
-		return be32_to_cpu((__force __be32)__raw_readl(addr));
-#else
-		return be32_to_cpu((__force __be32)(unsigned int)__indirect_readl(addr));
 #endif
 	}
 }
@@ -502,20 +452,6 @@ static inline void iowrite16(u16 value, void __iomem *addr)
 #endif
 }
 
-#define	iowrite16be(v, p)			iowrite16be(v, p)
-static inline void iowrite16be(u16 value, void __iomem *addr)
-{
-	unsigned long port = (unsigned long __force)addr;
-	if (__is_io_address(port))
-		outw(value, port & PIO_MASK);
-	else
-#ifndef CONFIG_IXP4XX_INDIRECT_PCI
-		__raw_writew(cpu_to_be16(value), addr);
-#else
-		__indirect_writew(cpu_to_be16(value), addr);
-#endif
-}
-
 #define	iowrite16_rep(p, v, c)		iowrite16_rep(p, v, c)
 static inline void iowrite16_rep(void __iomem *addr, const void *vaddr,
 				 u32 count)
@@ -542,20 +478,6 @@ static inline void iowrite32(u32 value, void __iomem *addr)
 		__raw_writel((u32 __force)cpu_to_le32(value), addr);
 #else
 		__indirect_writel(value, addr);
-#endif
-}
-
-#define	iowrite32be(v, p)			iowrite32be(v, p)
-static inline void iowrite32be(u32 value, void __iomem *addr)
-{
-	unsigned long port = (unsigned long __force)addr;
-	if (__is_io_address(port))
-		outl(value, port & PIO_MASK);
-	else
-#ifndef CONFIG_IXP4XX_INDIRECT_PCI
-		__raw_writel((u32 __force)cpu_to_be32(value), addr);
-#else
-		__indirect_writel((u32 __force)cpu_to_be32(value), addr);
 #endif
 }
 

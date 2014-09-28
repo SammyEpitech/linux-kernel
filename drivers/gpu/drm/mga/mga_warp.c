@@ -32,9 +32,8 @@
 #include <linux/platform_device.h>
 #include <linux/module.h>
 
-#include "drmP.h"
-#include "drm.h"
-#include "mga_drm.h"
+#include <drm/drmP.h>
+#include <drm/mga_drm.h>
 #include "mga_drv.h"
 
 #define FIRMWARE_G200 "matrox/g200_warp.fw"
@@ -80,8 +79,11 @@ int mga_warp_install_microcode(drm_mga_private_t *dev_priv)
 	}
 	rc = request_ihex_firmware(&fw, firmware_name, &pdev->dev);
 	platform_device_unregister(pdev);
-	if (rc)
+	if (rc) {
+		DRM_ERROR("mga: Failed to load microcode \"%s\"\n",
+			  firmware_name);
 		return rc;
+	}
 
 	size = 0;
 	where = 0;

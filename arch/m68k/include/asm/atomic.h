@@ -2,7 +2,9 @@
 #define __ARCH_M68K_ATOMIC__
 
 #include <linux/types.h>
-#include <asm/system.h>
+#include <linux/irqflags.h>
+#include <asm/cmpxchg.h>
+#include <asm/barrier.h>
 
 /*
  * Atomic operations that C can't guarantee us.  Useful for
@@ -52,6 +54,16 @@ static inline int atomic_dec_and_test(atomic_t *v)
 {
 	char c;
 	__asm__ __volatile__("subql #1,%1; seq %0" : "=d" (c), "+m" (*v));
+	return c != 0;
+}
+
+static inline int atomic_dec_and_test_lt(atomic_t *v)
+{
+	char c;
+	__asm__ __volatile__(
+		"subql #1,%1; slt %0"
+		: "=d" (c), "=m" (*v)
+		: "m" (*v));
 	return c != 0;
 }
 
@@ -197,12 +209,5 @@ static __inline__ int __atomic_add_unless(atomic_t *v, int a, int u)
 	}
 	return c;
 }
-
-
-/* Atomic operations are already serializing */
-#define smp_mb__before_atomic_dec()	barrier()
-#define smp_mb__after_atomic_dec()	barrier()
-#define smp_mb__before_atomic_inc()	barrier()
-#define smp_mb__after_atomic_inc()	barrier()
 
 #endif /* __ARCH_M68K_ATOMIC __ */

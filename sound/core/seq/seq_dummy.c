@@ -46,7 +46,7 @@
 
   The number of ports to be created can be specified via the module
   parameter "ports".  For example, to create four ports, add the
-  following option in /etc/modprobe.conf:
+  following option in a configuration file under /etc/modprobe.d/:
 
 	option snd-seq-dummy ports=4
 
@@ -65,7 +65,7 @@ MODULE_LICENSE("GPL");
 MODULE_ALIAS("snd-seq-client-" __stringify(SNDRV_SEQ_CLIENT_DUMMY));
 
 static int ports = 1;
-static int duplex;
+static bool duplex;
 
 module_param(ports, int, 0444);
 MODULE_PARM_DESC(ports, "number of ports to be created");
@@ -198,7 +198,7 @@ register_client(void)
 	int i;
 
 	if (ports < 1) {
-		snd_printk(KERN_ERR "invalid number of ports %d\n", ports);
+		pr_err("ALSA: seq_dummy: invalid number of ports %d\n", ports);
 		return -EINVAL;
 	}
 

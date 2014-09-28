@@ -32,27 +32,28 @@ ENTRY(cpu_arm9tdmi_proc_init)
 ENTRY(cpu_arm9tdmi_do_idle)
 ENTRY(cpu_arm9tdmi_dcache_clean_area)
 ENTRY(cpu_arm9tdmi_switch_mm)
-		mov	pc, lr
+		ret	lr
 
 /*
  * cpu_arm9tdmi_proc_fin()
  */
 ENTRY(cpu_arm9tdmi_proc_fin)
-		mov	pc, lr
+		ret	lr
 
 /*
  * Function: cpu_arm9tdmi_reset(loc)
  * Params  : loc(r0)	address to jump to
  * Purpose : Sets up everything for a reset and jump to the location for soft reset.
  */
+		.pushsection	.idmap.text, "ax"
 ENTRY(cpu_arm9tdmi_reset)
-		mov	pc, r0
-
-		__CPUINIT
+		ret	r0
+ENDPROC(cpu_arm9tdmi_reset)
+		.popsection
 
 		.type	__arm9tdmi_setup, #function
 __arm9tdmi_setup:
-		mov	pc, lr
+		ret	lr
 		.size	__arm9tdmi_setup, . - __arm9tdmi_setup
 
 		__INITDATA

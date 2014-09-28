@@ -15,7 +15,7 @@
 #define __ASM_AVR32_ATOMIC_H
 
 #include <linux/types.h>
-#include <asm/system.h>
+#include <asm/cmpxchg.h>
 
 #define ATOMIC_INIT(i)  { (i) }
 
@@ -182,10 +182,5 @@ static inline int atomic_sub_if_positive(int i, atomic_t *v)
 #define atomic_add_negative(i, v) (atomic_add_return(i, v) < 0)
 
 #define atomic_dec_if_positive(v) atomic_sub_if_positive(1, v)
-
-#define smp_mb__before_atomic_dec()	barrier()
-#define smp_mb__after_atomic_dec()	barrier()
-#define smp_mb__before_atomic_inc()	barrier()
-#define smp_mb__after_atomic_inc()	barrier()
 
 #endif /*  __ASM_AVR32_ATOMIC_H */

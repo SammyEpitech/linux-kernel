@@ -1,30 +1,23 @@
-/*******************************************************************************
-
-  Intel PRO/1000 Linux driver
-  Copyright(c) 1999 - 2013 Intel Corporation.
-
-  This program is free software; you can redistribute it and/or modify it
-  under the terms and conditions of the GNU General Public License,
-  version 2, as published by the Free Software Foundation.
-
-  This program is distributed in the hope it will be useful, but WITHOUT
-  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
-  more details.
-
-  You should have received a copy of the GNU General Public License along with
-  this program; if not, write to the Free Software Foundation, Inc.,
-  51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
-
-  The full GNU General Public License is included in this distribution in
-  the file called "COPYING".
-
-  Contact Information:
-  Linux NICS <linux.nics@intel.com>
-  e1000-devel Mailing List <e1000-devel@lists.sourceforge.net>
-  Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
-
-*******************************************************************************/
+/* Intel PRO/1000 Linux driver
+ * Copyright(c) 1999 - 2014 Intel Corporation.
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms and conditions of the GNU General Public License,
+ * version 2, as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ * The full GNU General Public License is included in this distribution in
+ * the file called "COPYING".
+ *
+ * Contact Information:
+ * Linux NICS <linux.nics@intel.com>
+ * e1000-devel Mailing List <e1000-devel@lists.sourceforge.net>
+ * Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
+ */
 
 /* ethtool support for e1000 */
 
@@ -108,11 +101,10 @@ static const struct e1000_stats e1000_gstrings_stats[] = {
 	E1000_STAT("dropped_smbus", stats.mgpdc),
 	E1000_STAT("rx_dma_failed", rx_dma_failed),
 	E1000_STAT("tx_dma_failed", tx_dma_failed),
-#ifdef CONFIG_E1000E_PTP
 	E1000_STAT("rx_hwtstamp_cleared", rx_hwtstamp_cleared),
-#endif
 	E1000_STAT("uncorr_ecc_errors", uncorr_errors),
 	E1000_STAT("corr_ecc_errors", corr_errors),
+	E1000_STAT("tx_hwtstamp_timeouts", tx_hwtstamp_timeouts),
 };
 
 #define E1000_GLOBAL_STATS_LEN	ARRAY_SIZE(e1000_gstrings_stats)
@@ -167,8 +159,8 @@ static int e1000_get_settings(struct net_device *netdev,
 		ecmd->transceiver = XCVR_EXTERNAL;
 	}
 
-	speed = -1;
-	ecmd->duplex = -1;
+	speed = SPEED_UNKNOWN;
+	ecmd->duplex = DUPLEX_UNKNOWN;
 
 	if (netif_running(netdev)) {
 		if (netif_carrier_ok(netdev)) {
@@ -177,6 +169,7 @@ static int e1000_get_settings(struct net_device *netdev,
 		}
 	} else if (!pm_runtime_suspended(netdev->dev.parent)) {
 		u32 status = er32(STATUS);
+
 		if (status & E1000_STATUS_LU) {
 			if (status & E1000_STATUS_SPEED_1000)
 				speed = SPEED_1000;
@@ -202,6 +195,11 @@ static int e1000_get_settings(struct net_device *netdev,
 		ecmd->eth_tp_mdix = hw->phy.is_mdix ? ETH_TP_MDI_X : ETH_TP_MDI;
 	else
 		ecmd->eth_tp_mdix = ETH_TP_MDI_INVALID;
+
+	if (hw->phy.mdix == AUTO_ALL_MODES)
+		ecmd->eth_tp_mdix_ctrl = ETH_TP_MDI_AUTO;
+	else
+		ecmd->eth_tp_mdix_ctrl = hw->phy.mdix;
 
 	return 0;
 }
@@ -245,6 +243,10 @@ static int e1000_set_spd_dplx(struct e1000_adapter *adapter, u32 spd, u8 dplx)
 	default:
 		goto err_inval;
 	}
+
+	/* clear MDI, MDI(-X) override is only allowed when autoneg enabled */
+	adapter->hw.phy.mdix = AUTO_ALL_MODES;
+
 	return 0;
 
 err_inval:
@@ -271,6 +273,24 @@ static int e1000_set_settings(struct net_device *netdev,
 		goto out;
 	}
 
+	/* MDI setting is only allowed when autoneg enabled because
+	 * some hardware doesn't allow MDI setting when speed or
+	 * duplex is forced.
+	 */
+	if (ecmd->eth_tp_mdix_ctrl) {
+		if (hw->phy.media_type != e1000_media_type_copper) {
+			ret_val = -EOPNOTSUPP;
+			goto out;
+		}
+
+		if ((ecmd->eth_tp_mdix_ctrl != ETH_TP_MDI_AUTO) &&
+		    (ecmd->autoneg != AUTONEG_ENABLE)) {
+			e_err("forcing MDI/MDI-X state is not supported when link speed and/or duplex are forced\n");
+			ret_val = -EINVAL;
+			goto out;
+		}
+	}
+
 	while (test_and_set_bit(__E1000_RESETTING, &adapter->state))
 		usleep_range(1000, 2000);
 
@@ -287,16 +307,27 @@ static int e1000_set_settings(struct net_device *netdev,
 			hw->fc.requested_mode = e1000_fc_default;
 	} else {
 		u32 speed = ethtool_cmd_speed(ecmd);
+		/* calling this overrides forced MDI setting */
 		if (e1000_set_spd_dplx(adapter, speed, ecmd->duplex)) {
 			ret_val = -EINVAL;
 			goto out;
 		}
 	}
 
-	/* reset the link */
+	/* MDI-X => 2; MDI => 1; Auto => 3 */
+	if (ecmd->eth_tp_mdix_ctrl) {
+		/* fix up the value for auto (3 => 0) as zero is mapped
+		 * internally to auto
+		 */
+		if (ecmd->eth_tp_mdix_ctrl == ETH_TP_MDI_AUTO)
+			hw->phy.mdix = AUTO_ALL_MODES;
+		else
+			hw->phy.mdix = ecmd->eth_tp_mdix_ctrl;
+	}
 
+	/* reset the link */
 	if (netif_running(adapter->netdev)) {
-		e1000e_down(adapter);
+		e1000e_down(adapter, true);
 		e1000e_up(adapter);
 	} else {
 		e1000e_reset(adapter);
@@ -344,7 +375,7 @@ static int e1000_set_pauseparam(struct net_device *netdev,
 	if (adapter->fc_autoneg == AUTONEG_ENABLE) {
 		hw->fc.requested_mode = e1000_fc_default;
 		if (netif_running(adapter->netdev)) {
-			e1000e_down(adapter);
+			e1000e_down(adapter, true);
 			e1000e_up(adapter);
 		} else {
 			e1000e_reset(adapter);
@@ -690,7 +721,7 @@ static int e1000_set_ringparam(struct net_device *netdev,
 
 	pm_runtime_get_sync(netdev->dev.parent);
 
-	e1000e_down(adapter);
+	e1000e_down(adapter, true);
 
 	/* We can't just free everything and then setup again, because the
 	 * ISRs in MSI-X mode get passed pointers to the Tx and Rx ring
@@ -753,25 +784,26 @@ static bool reg_pattern_test(struct e1000_adapter *adapter, u64 *data,
 			      reg + (offset << 2), val,
 			      (test[pat] & write & mask));
 			*data = reg;
-			return 1;
+			return true;
 		}
 	}
-	return 0;
+	return false;
 }
 
 static bool reg_set_and_check(struct e1000_adapter *adapter, u64 *data,
 			      int reg, u32 mask, u32 write)
 {
 	u32 val;
+
 	__ew32(&adapter->hw, reg, write & mask);
 	val = __er32(&adapter->hw, reg);
 	if ((write & mask) != (val & mask)) {
 		e_err("set/check test failed (reg 0x%05X): got 0x%08X expected 0x%08X\n",
 		      reg, (val & mask), (write & mask));
 		*data = reg;
-		return 1;
+		return true;
 	}
-	return 0;
+	return false;
 }
 
 #define REG_PATTERN_TEST_ARRAY(reg, offset, mask, write)                       \
@@ -888,15 +920,21 @@ static int e1000_reg_test(struct e1000_adapter *adapter, u64 *data)
 		}
 		if (mac->type == e1000_pch2lan) {
 			/* SHRAH[0,1,2] different than previous */
-			if (i == 7)
+			if (i == 1)
 				mask &= 0xFFF4FFFF;
 			/* SHRAH[3] different than SHRAH[0,1,2] */
-			if (i == 10)
+			if (i == 4)
 				mask |= (1 << 30);
+			/* RAR[1-6] owned by management engine - skipping */
+			if (i > 0)
+				i += 6;
 		}
 
 		REG_PATTERN_TEST_ARRAY(E1000_RA, ((i << 1) + 1), mask,
 				       0xFFFFFFFF);
+		/* reset index to actual value */
+		if ((mac->type == e1000_pch2lan) && (i > 6))
+			i -= 6;
 	}
 
 	for (i = 0; i < mac->mta_reg_count; i++)
@@ -1483,11 +1521,9 @@ static int e1000_setup_loopback_test(struct e1000_adapter *adapter)
 		switch (hw->mac.type) {
 		case e1000_80003es2lan:
 			return e1000_set_es2lan_mac_loopback(adapter);
-			break;
 		case e1000_82571:
 		case e1000_82572:
 			return e1000_set_82571_fiber_loopback(adapter);
-			break;
 		default:
 			rctl = er32(RCTL);
 			rctl |= E1000_RCTL_LBM_TCVR;
@@ -1681,6 +1717,7 @@ static int e1000_link_test(struct e1000_adapter *adapter, u64 *data)
 	*data = 0;
 	if (hw->phy.media_type == e1000_media_type_internal_serdes) {
 		int i = 0;
+
 		hw->mac.serdes_has_link = false;
 
 		/* On some blade server designs, link establishment
@@ -2092,6 +2129,159 @@ static int e1000_get_rxnfc(struct net_device *netdev,
 	}
 }
 
+static int e1000e_get_eee(struct net_device *netdev, struct ethtool_eee *edata)
+{
+	struct e1000_adapter *adapter = netdev_priv(netdev);
+	struct e1000_hw *hw = &adapter->hw;
+	u16 cap_addr, lpa_addr, pcs_stat_addr, phy_data;
+	u32 ret_val;
+
+	if (!(adapter->flags2 & FLAG2_HAS_EEE))
+		return -EOPNOTSUPP;
+
+	switch (hw->phy.type) {
+	case e1000_phy_82579:
+		cap_addr = I82579_EEE_CAPABILITY;
+		lpa_addr = I82579_EEE_LP_ABILITY;
+		pcs_stat_addr = I82579_EEE_PCS_STATUS;
+		break;
+	case e1000_phy_i217:
+		cap_addr = I217_EEE_CAPABILITY;
+		lpa_addr = I217_EEE_LP_ABILITY;
+		pcs_stat_addr = I217_EEE_PCS_STATUS;
+		break;
+	default:
+		return -EOPNOTSUPP;
+	}
+
+	pm_runtime_get_sync(netdev->dev.parent);
+
+	ret_val = hw->phy.ops.acquire(hw);
+	if (ret_val) {
+		pm_runtime_put_sync(netdev->dev.parent);
+		return -EBUSY;
+	}
+
+	/* EEE Capability */
+	ret_val = e1000_read_emi_reg_locked(hw, cap_addr, &phy_data);
+	if (ret_val)
+		goto release;
+	edata->supported = mmd_eee_cap_to_ethtool_sup_t(phy_data);
+
+	/* EEE Advertised */
+	edata->advertised = mmd_eee_adv_to_ethtool_adv_t(adapter->eee_advert);
+
+	/* EEE Link Partner Advertised */
+	ret_val = e1000_read_emi_reg_locked(hw, lpa_addr, &phy_data);
+	if (ret_val)
+		goto release;
+	edata->lp_advertised = mmd_eee_adv_to_ethtool_adv_t(phy_data);
+
+	/* EEE PCS Status */
+	ret_val = e1000_read_emi_reg_locked(hw, pcs_stat_addr, &phy_data);
+	if (ret_val)
+		goto release;
+	if (hw->phy.type == e1000_phy_82579)
+		phy_data <<= 8;
+
+	/* Result of the EEE auto negotiation - there is no register that
+	 * has the status of the EEE negotiation so do a best-guess based
+	 * on whether Tx or Rx LPI indications have been received.
+	 */
+	if (phy_data & (E1000_EEE_TX_LPI_RCVD | E1000_EEE_RX_LPI_RCVD))
+		edata->eee_active = true;
+
+	edata->eee_enabled = !hw->dev_spec.ich8lan.eee_disable;
+	edata->tx_lpi_enabled = true;
+	edata->tx_lpi_timer = er32(LPIC) >> E1000_LPIC_LPIET_SHIFT;
+
+release:
+	hw->phy.ops.release(hw);
+	if (ret_val)
+		ret_val = -ENODATA;
+
+	pm_runtime_put_sync(netdev->dev.parent);
+
+	return ret_val;
+}
+
+static int e1000e_set_eee(struct net_device *netdev, struct ethtool_eee *edata)
+{
+	struct e1000_adapter *adapter = netdev_priv(netdev);
+	struct e1000_hw *hw = &adapter->hw;
+	struct ethtool_eee eee_curr;
+	s32 ret_val;
+
+	ret_val = e1000e_get_eee(netdev, &eee_curr);
+	if (ret_val)
+		return ret_val;
+
+	if (eee_curr.tx_lpi_enabled != edata->tx_lpi_enabled) {
+		e_err("Setting EEE tx-lpi is not supported\n");
+		return -EINVAL;
+	}
+
+	if (eee_curr.tx_lpi_timer != edata->tx_lpi_timer) {
+		e_err("Setting EEE Tx LPI timer is not supported\n");
+		return -EINVAL;
+	}
+
+	if (edata->advertised & ~(ADVERTISE_100_FULL | ADVERTISE_1000_FULL)) {
+		e_err("EEE advertisement supports only 100TX and/or 1000T full-duplex\n");
+		return -EINVAL;
+	}
+
+	adapter->eee_advert = ethtool_adv_to_mmd_eee_adv_t(edata->advertised);
+
+	hw->dev_spec.ich8lan.eee_disable = !edata->eee_enabled;
+
+	pm_runtime_get_sync(netdev->dev.parent);
+
+	/* reset the link */
+	if (netif_running(netdev))
+		e1000e_reinit_locked(adapter);
+	else
+		e1000e_reset(adapter);
+
+	pm_runtime_put_sync(netdev->dev.parent);
+
+	return 0;
+}
+
+static int e1000e_get_ts_info(struct net_device *netdev,
+			      struct ethtool_ts_info *info)
+{
+	struct e1000_adapter *adapter = netdev_priv(netdev);
+
+	ethtool_op_get_ts_info(netdev, info);
+
+	if (!(adapter->flags & FLAG_HAS_HW_TIMESTAMP))
+		return 0;
+
+	info->so_timestamping |= (SOF_TIMESTAMPING_TX_HARDWARE |
+				  SOF_TIMESTAMPING_RX_HARDWARE |
+				  SOF_TIMESTAMPING_RAW_HARDWARE);
+
+	info->tx_types = (1 << HWTSTAMP_TX_OFF) | (1 << HWTSTAMP_TX_ON);
+
+	info->rx_filters = ((1 << HWTSTAMP_FILTER_NONE) |
+			    (1 << HWTSTAMP_FILTER_PTP_V1_L4_SYNC) |
+			    (1 << HWTSTAMP_FILTER_PTP_V1_L4_DELAY_REQ) |
+			    (1 << HWTSTAMP_FILTER_PTP_V2_L4_SYNC) |
+			    (1 << HWTSTAMP_FILTER_PTP_V2_L4_DELAY_REQ) |
+			    (1 << HWTSTAMP_FILTER_PTP_V2_L2_SYNC) |
+			    (1 << HWTSTAMP_FILTER_PTP_V2_L2_DELAY_REQ) |
+			    (1 << HWTSTAMP_FILTER_PTP_V2_EVENT) |
+			    (1 << HWTSTAMP_FILTER_PTP_V2_SYNC) |
+			    (1 << HWTSTAMP_FILTER_PTP_V2_DELAY_REQ) |
+			    (1 << HWTSTAMP_FILTER_ALL));
+
+	if (adapter->ptp_clock)
+		info->phc_index = ptp_clock_index(adapter->ptp_clock);
+
+	return 0;
+}
+
 static const struct ethtool_ops e1000_ethtool_ops = {
 	.get_settings		= e1000_get_settings,
 	.set_settings		= e1000_set_settings,
@@ -2119,9 +2309,12 @@ static const struct ethtool_ops e1000_ethtool_ops = {
 	.get_coalesce		= e1000_get_coalesce,
 	.set_coalesce		= e1000_set_coalesce,
 	.get_rxnfc		= e1000_get_rxnfc,
+	.get_ts_info		= e1000e_get_ts_info,
+	.get_eee		= e1000e_get_eee,
+	.set_eee		= e1000e_set_eee,
 };
 
 void e1000e_set_ethtool_ops(struct net_device *netdev)
 {
-	SET_ETHTOOL_OPS(netdev, &e1000_ethtool_ops);
+	netdev->ethtool_ops = &e1000_ethtool_ops;
 }

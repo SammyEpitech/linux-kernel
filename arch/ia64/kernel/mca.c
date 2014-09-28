@@ -92,7 +92,6 @@
 #include <asm/meminit.h>
 #include <asm/page.h>
 #include <asm/ptrace.h>
-#include <asm/system.h>
 #include <asm/sal.h>
 #include <asm/mca.h>
 #include <asm/kexec.h>
@@ -218,7 +217,7 @@ void ia64_mca_printk(const char *fmt, ...)
 	/* Copy the output into mlogbuf */
 	if (oops_in_progress) {
 		/* mlogbuf was abandoned, use printk directly instead. */
-		printk(temp_buf);
+		printk("%s", temp_buf);
 	} else {
 		spin_lock(&mlogbuf_wlock);
 		for (p = temp_buf; *p; p++) {
@@ -269,7 +268,7 @@ void ia64_mlogbuf_dump(void)
 		}
 		*p = '\0';
 		if (temp_buf[0])
-			printk(temp_buf);
+			printk("%s", temp_buf);
 		mlogbuf_start = index;
 
 		mlogbuf_timestamp = 0;
@@ -632,7 +631,7 @@ ia64_mca_register_cpev (int cpev)
  * Outputs
  *	None
  */
-void __cpuinit
+void
 ia64_mca_cmc_vector_setup (void)
 {
 	cmcv_reg_t	cmcv;
@@ -1447,6 +1446,8 @@ out:
 	/* Get the CMC error record and log it */
 	ia64_mca_log_sal_error_record(SAL_INFO_TYPE_CMC);
 
+	local_irq_disable();
+
 	return IRQ_HANDLED;
 }
 
@@ -1513,7 +1514,8 @@ static void
 ia64_mca_cmc_poll (unsigned long dummy)
 {
 	/* Trigger a CMC interrupt cascade  */
-	platform_send_ipi(first_cpu(cpu_online_map), IA64_CMCP_VECTOR, IA64_IPI_DM_INT, 0);
+	platform_send_ipi(cpumask_first(cpu_online_mask), IA64_CMCP_VECTOR,
+							IA64_IPI_DM_INT, 0);
 }
 
 /*
@@ -1589,7 +1591,8 @@ static void
 ia64_mca_cpe_poll (unsigned long dummy)
 {
 	/* Trigger a CPE interrupt cascade  */
-	platform_send_ipi(first_cpu(cpu_online_map), IA64_CPEP_VECTOR, IA64_IPI_DM_INT, 0);
+	platform_send_ipi(cpumask_first(cpu_online_mask), IA64_CPEP_VECTOR,
+							IA64_IPI_DM_INT, 0);
 }
 
 #endif /* CONFIG_ACPI */
@@ -1769,38 +1772,32 @@ __setup("disable_cpe_poll", ia64_mca_disable_cpe_polling);
 
 static struct irqaction cmci_irqaction = {
 	.handler =	ia64_mca_cmc_int_handler,
-	.flags =	IRQF_DISABLED,
 	.name =		"cmc_hndlr"
 };
 
 static struct irqaction cmcp_irqaction = {
 	.handler =	ia64_mca_cmc_int_caller,
-	.flags =	IRQF_DISABLED,
 	.name =		"cmc_poll"
 };
 
 static struct irqaction mca_rdzv_irqaction = {
 	.handler =	ia64_mca_rendez_int_handler,
-	.flags =	IRQF_DISABLED,
 	.name =		"mca_rdzv"
 };
 
 static struct irqaction mca_wkup_irqaction = {
 	.handler =	ia64_mca_wakeup_int_handler,
-	.flags =	IRQF_DISABLED,
 	.name =		"mca_wkup"
 };
 
 #ifdef CONFIG_ACPI
 static struct irqaction mca_cpe_irqaction = {
 	.handler =	ia64_mca_cpe_int_handler,
-	.flags =	IRQF_DISABLED,
 	.name =		"cpe_hndlr"
 };
 
 static struct irqaction mca_cpep_irqaction = {
 	.handler =	ia64_mca_cpe_int_caller,
-	.flags =	IRQF_DISABLED,
 	.name =		"cpe_poll"
 };
 #endif /* CONFIG_ACPI */
@@ -1811,7 +1808,7 @@ static struct irqaction mca_cpep_irqaction = {
  * format most of the fields.
  */
 
-static void __cpuinit
+static void
 format_mca_init_stack(void *mca_data, unsigned long offset,
 		const char *type, int cpu)
 {
@@ -1841,7 +1838,7 @@ static void * __init_refok mca_bootmem(void)
 }
 
 /* Do per-CPU MCA-related initialization.  */
-void __cpuinit
+void
 ia64_mca_cpu_init(void *cpu_data)
 {
 	void *pal_vaddr;
@@ -1893,7 +1890,7 @@ ia64_mca_cpu_init(void *cpu_data)
 							      PAGE_KERNEL));
 }
 
-static void __cpuinit ia64_mca_cmc_vector_adjust(void *dummy)
+static void ia64_mca_cmc_vector_adjust(void *dummy)
 {
 	unsigned long flags;
 
@@ -1903,7 +1900,7 @@ static void __cpuinit ia64_mca_cmc_vector_adjust(void *dummy)
 	local_irq_restore(flags);
 }
 
-static int __cpuinit mca_cpu_callback(struct notifier_block *nfb,
+static int mca_cpu_callback(struct notifier_block *nfb,
 				      unsigned long action,
 				      void *hcpu)
 {
@@ -1919,7 +1916,7 @@ static int __cpuinit mca_cpu_callback(struct notifier_block *nfb,
 	return NOTIFY_OK;
 }
 
-static struct notifier_block mca_cpu_notifier __cpuinitdata = {
+static struct notifier_block mca_cpu_notifier = {
 	.notifier_call = mca_cpu_callback
 };
 

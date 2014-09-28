@@ -13,6 +13,10 @@
 #include <linux/sysctl.h>
 #include <linux/init.h>
 #include <linux/fs.h>
+#include <linux/magic.h>
+
+#include <asm/setup.h>
+
 #include "trace.h"
 
 #define STACK_TRACE_ENTRIES 500
@@ -41,18 +45,39 @@ static unsigned long max_stack_size;
 static arch_spinlock_t max_stack_lock =
 	(arch_spinlock_t)__ARCH_SPIN_LOCK_UNLOCKED;
 
-static int stack_trace_disabled __read_mostly;
 static DEFINE_PER_CPU(int, trace_active);
 static DEFINE_MUTEX(stack_sysctl_mutex);
 
 int stack_tracer_enabled;
 static int last_stack_tracer_enabled;
 
+static inline void print_max_stack(void)
+{
+	long i;
+	int size;
+
+	pr_emerg("        Depth    Size   Location    (%d entries)\n"
+			   "        -----    ----   --------\n",
+			   max_stack_trace.nr_entries - 1);
+
+	for (i = 0; i < max_stack_trace.nr_entries; i++) {
+		if (stack_dump_trace[i] == ULONG_MAX)
+			break;
+		if (i+1 == max_stack_trace.nr_entries ||
+				stack_dump_trace[i+1] == ULONG_MAX)
+			size = stack_dump_index[i];
+		else
+			size = stack_dump_index[i] - stack_dump_index[i+1];
+
+		pr_emerg("%3ld) %8d   %5d   %pS\n", i, stack_dump_index[i],
+				size, (void *)stack_dump_trace[i]);
+	}
+}
+
 static inline void
 check_stack(unsigned long ip, unsigned long *stack)
 {
-	unsigned long this_size, flags;
-	unsigned long *p, *top, *start;
+	unsigned long this_size, flags; unsigned long *p, *top, *start;
 	static int tracer_frame;
 	int frame_size = ACCESS_ONCE(tracer_frame);
 	int i;
@@ -82,8 +107,12 @@ check_stack(unsigned long ip, unsigned long *stack)
 
 	max_stack_size = this_size;
 
-	max_stack_trace.nr_entries	= 0;
-	max_stack_trace.skip		= 3;
+	max_stack_trace.nr_entries = 0;
+
+	if (using_ftrace_ops_list_func())
+		max_stack_trace.skip = 4;
+	else
+		max_stack_trace.skip = 3;
 
 	save_stack_trace(&max_stack_trace);
 
@@ -142,19 +171,23 @@ check_stack(unsigned long ip, unsigned long *stack)
 			i++;
 	}
 
+	if ((current != &init_task &&
+		*(end_of_stack(current)) != STACK_END_MAGIC)) {
+		print_max_stack();
+		BUG();
+	}
+
  out:
 	arch_spin_unlock(&max_stack_lock);
 	local_irq_restore(flags);
 }
 
 static void
-stack_trace_call(unsigned long ip, unsigned long parent_ip)
+stack_trace_call(unsigned long ip, unsigned long parent_ip,
+		 struct ftrace_ops *op, struct pt_regs *pt_regs)
 {
 	unsigned long stack;
 	int cpu;
-
-	if (unlikely(!ftrace_enabled || stack_trace_disabled))
-		return;
 
 	preempt_disable_notrace();
 
@@ -193,7 +226,7 @@ stack_trace_call(unsigned long ip, unsigned long parent_ip)
 static struct ftrace_ops trace_ops __read_mostly =
 {
 	.func = stack_trace_call,
-	.flags = FTRACE_OPS_FL_GLOBAL,
+	.flags = FTRACE_OPS_FL_RECURSION_SAFE,
 };
 
 static ssize_t
@@ -371,6 +404,21 @@ static const struct file_operations stack_trace_fops = {
 	.release	= seq_release,
 };
 
+static int
+stack_trace_filter_open(struct inode *inode, struct file *file)
+{
+	return ftrace_regex_open(&trace_ops, FTRACE_ITER_FILTER,
+				 inode, file);
+}
+
+static const struct file_operations stack_trace_filter_fops = {
+	.open = stack_trace_filter_open,
+	.read = seq_read,
+	.write = ftrace_filter_write,
+	.llseek = tracing_lseek,
+	.release = ftrace_regex_release,
+};
+
 int
 stack_trace_sysctl(struct ctl_table *table, int write,
 		   void __user *buffer, size_t *lenp,
@@ -398,8 +446,13 @@ stack_trace_sysctl(struct ctl_table *table, int write,
 	return ret;
 }
 
+static char stack_trace_filter_buf[COMMAND_LINE_SIZE+1] __initdata;
+
 static __init int enable_stacktrace(char *str)
 {
+	if (strncmp(str, "_filter=", 8) == 0)
+		strncpy(stack_trace_filter_buf, str+8, COMMAND_LINE_SIZE);
+
 	stack_tracer_enabled = 1;
 	last_stack_tracer_enabled = 1;
 	return 1;
@@ -419,6 +472,12 @@ static __init int stack_trace_init(void)
 
 	trace_create_file("stack_trace", 0444, d_tracer,
 			NULL, &stack_trace_fops);
+
+	trace_create_file("stack_trace_filter", 0444, d_tracer,
+			NULL, &stack_trace_filter_fops);
+
+	if (stack_trace_filter_buf[0])
+		ftrace_set_early_filter(&trace_ops, stack_trace_filter_buf, 1);
 
 	if (stack_tracer_enabled)
 		register_ftrace_function(&trace_ops);
