@@ -14,14 +14,17 @@
 SYSCALL_DEFINE1(uptime, long __user *, mseconds)
 {
 	struct timespec ut;
+	long		result;
 
 	get_monotonic_boottime(&ut);
-	pr_debug("seconds: %l, nanoseconds: %l\n", ut.tv_sec, ut.tv_nsec);
-	*mseconds = ut.tv_nsec / NSEC_PER_MSEC;
-	if (*mseconds + ut.tv_sec * MSEC_PER_SEC > LONG_MAX)
+	pr_debug("seconds: %ld, nanoseconds: %ld\n", ut.tv_sec, ut.tv_nsec);
+	result = ut.tv_nsec / NSEC_PER_MSEC;
+	if (result + ut.tv_sec * MSEC_PER_SEC > LONG_MAX)
 	  return -ERANGE;
-	*mseconds += ut.tv_sec * MSEC_PER_SEC;
-	pr_debug("result in milliseconds: %l\n", *mseconds);
+	result += ut.tv_sec * MSEC_PER_SEC;
+	if (copy_to_user(mseconds, &result, sizeof(result)))
+	  return -EFAULT;
+	pr_debug("result in milliseconds: %ld\n", *mseconds);
 	return 0;
 }
 
